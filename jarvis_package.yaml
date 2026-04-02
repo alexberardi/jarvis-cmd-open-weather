@@ -1,0 +1,36 @@
+name: "get_weather_openweather"
+display_name: "OpenWeather"
+description: "Current weather conditions and forecasts up to 8 days via OpenWeather API. Requires free API key. Supports city lookup, IP-based location fallback, and configurable units."
+version: "1.0.0"
+min_jarvis_version: "0.9.0"
+license: "MIT"
+author:
+  github: "alexberardi"
+categories: ["information", "weather"]
+platforms: ["darwin", "linux"]
+keywords: ["weather", "forecast", "temperature", "rain", "snow", "wind", "conditions"]
+
+components:
+  - type: command
+    name: get_weather_openweather
+    path: commands/get_weather/command.py
+
+packages:
+  - name: httpx
+
+secrets:
+  - key: OPENWEATHER_API_KEY
+    scope: integration
+    value_type: string
+    description: "OpenWeather API key (free tier: 1000 calls/day)"
+    is_sensitive: true
+  - key: OPENWEATHER_UNITS
+    scope: integration
+    value_type: string
+    description: "Unit system: imperial (°F), metric (°C), or kelvin"
+    is_sensitive: false
+  - key: OPENWEATHER_LOCATION
+    scope: node
+    value_type: string
+    description: "Default location as city,state_code,country_code (e.g., Miami,FL,US). Falls back to IP geolocation if omitted."
+    is_sensitive: false
