@@ -27,11 +27,7 @@ from jarvis_command_sdk import (
     RequestInformation,
 )
 
-try:
-    from services.secret_service import get_secret_value
-except ImportError:
-    def get_secret_value(key: str, scope: str) -> str | None:
-        return None
+# Secrets arrive via the SDK's execute() wrapper — see run() below.
 
 try:
     from utils.date_util import extract_dates_from_datetimes, extract_date_from_datetime
@@ -211,8 +207,8 @@ class OpenWeatherCommand(IJarvisCommand):
             )
         ]
 
-    def run(self, request_info: RequestInformation, **kwargs) -> CommandResponse:
-        api_key = get_secret_value("OPENWEATHER_API_KEY", "integration")
+    def run(self, request_info: RequestInformation, *, secrets: dict, **kwargs) -> CommandResponse:
+        api_key = secrets.get("OPENWEATHER_API_KEY")
         if not api_key:
             raise Exception("Missing OpenWeather API key. Please set it in your node configuration first.")
 
@@ -221,7 +217,7 @@ class OpenWeatherCommand(IJarvisCommand):
             city = None
         logger.debug("Weather command city resolution", city_from_kwargs=city)
         if not city:
-            city = get_secret_value("OPENWEATHER_LOCATION", "node")
+            city = secrets.get("OPENWEATHER_LOCATION")
             logger.debug("City from OPENWEATHER_LOCATION secret", city=city)
         if not city:
             city = get_current_location()
@@ -229,7 +225,7 @@ class OpenWeatherCommand(IJarvisCommand):
         if not city:
             raise Exception("Could not determine location. Set OPENWEATHER_LOCATION in node settings or pass a city parameter.")
 
-        unit_system = (get_secret_value("OPENWEATHER_UNITS", "integration") or "imperial").lower()
+        unit_system = (secrets.get("OPENWEATHER_UNITS") or "imperial").lower()
         resolved_datetimes = kwargs.get("resolved_datetimes")
 
         geocode_url = f"http://api.openweathermap.org/geo/1.0/direct?q={city}&limit=1&appid={api_key}"
