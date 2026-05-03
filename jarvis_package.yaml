@@ -14,6 +14,9 @@ components:
   - type: command
     name: get_weather_openweather
     path: commands/get_weather/command.py
+  - type: agent
+    name: weather_context
+    path: agents/weather_context/agent.py
 
 packages:
   - name: httpx
