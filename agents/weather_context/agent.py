@@ -95,9 +95,14 @@ class WeatherContextAgent(IJarvisAgent):
 
         try:
             try:
+                # Source layout (dev / tests): commands/get_weather/command.py
                 from commands.get_weather.command import OpenWeatherCommand
             except ImportError:
-                from commands.custom_commands.get_weather.command import OpenWeatherCommand
+                # Installed layout: the component is named "get_weather_openweather"
+                # in the manifest, so the node scatters the command to
+                # commands/custom_commands/get_weather_openweather/ — NOT
+                # ".../get_weather/" (which the source path implies).
+                from commands.custom_commands.get_weather_openweather.command import OpenWeatherCommand
 
             from jarvis_command_sdk import RequestInformation
 
