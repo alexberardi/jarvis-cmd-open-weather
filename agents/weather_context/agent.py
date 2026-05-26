@@ -118,18 +118,26 @@ class WeatherContextAgent(IJarvisAgent):
                 if val:
                     secrets[optional_key] = val
 
+            # resolved_datetimes must be ISO date strings (YYYY-MM-DD), not
+            # relative keys like "today"/"tomorrow". The voice path goes
+            # through the SDK's RelativeDateKeys resolver before the command
+            # sees them; we have to pre-resolve ourselves. Local-time dates
+            # are what the user means by "today"/"tomorrow" in their tz.
+            today_iso = datetime.now().date().isoformat()
+            tomorrow_iso = (datetime.now().date() + timedelta(days=1)).isoformat()
+
             # Fetch current weather
             request_info = RequestInformation(
                 voice_command="weather check",
                 conversation_id="weather-context-agent",
             )
             current_response = cmd.run(
-                request_info, secrets=secrets, resolved_datetimes=["today"],
+                request_info, secrets=secrets, resolved_datetimes=[today_iso],
             )
 
             # Fetch tomorrow's forecast
             tomorrow_response = cmd.run(
-                request_info, secrets=secrets, resolved_datetimes=["tomorrow"],
+                request_info, secrets=secrets, resolved_datetimes=[tomorrow_iso],
             )
 
             memories = []
