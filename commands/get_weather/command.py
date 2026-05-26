@@ -19,11 +19,13 @@ from jarvis_command_sdk import (
     CommandAntipattern,
     CommandExample,
     CommandResponse,
+    FastPathPattern,
     IJarvisCommand,
     IJarvisParameter,
     JarvisParameter,
     IJarvisSecret,
     JarvisSecret,
+    PreRouteResult,
     RequestInformation,
 )
 
@@ -65,6 +67,19 @@ except ImportError:
         TOMORROW = "tomorrow"
         DAY_AFTER_TOMORROW = "day_after_tomorrow"
         THIS_WEEKEND = "this_weekend"
+
+# Resolve a day-offset into the ISO datetime string the command's run()
+# expects (CC normally does this for the LLM path via date_context; the
+# fast-path has to do it itself).
+try:
+    from utils.date_util import get_example_date_with_offset
+except ImportError:
+    def get_example_date_with_offset(offset: int = 0, user_timezone: str | None = None) -> str:
+        from datetime import datetime, timedelta, timezone
+        target = (datetime.now(timezone.utc) + timedelta(days=offset)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        return target.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 logger = JarvisLogger(service="jarvis-node")
 
@@ -277,6 +292,57 @@ class OpenWeatherCommand(IJarvisCommand):
             )
         ]
 
+    # ------------------------------------------------------------------
+    # Fast-path patterns — bypass the LLM for common day-level current-
+    # weather queries. Sub-day phrasings ('next hour', 'tonight') still
+    # go through the LLM because date-key resolution is involved; this
+    # path only claims the simple shapes.
+    # ------------------------------------------------------------------
+    @property
+    def fast_path_patterns(self) -> List[FastPathPattern]:
+        return [
+            FastPathPattern(
+                id="get_weather.in_location",
+                description="Bypass LLM for 'weather/forecast/temperature in <city>'",
+                example="what's the weather in San Francisco",
+                regex=r"\b(?:what(?:'?s|\s+is)?\s+the\s+)?(?:weather|forecast|temperature|temp)\s+in\s+(?P<location>[a-zA-Z][a-zA-Z\s]+?)\s*[?.!]*$",
+                handler="_fp_weather_in_location",
+            ),
+            FastPathPattern(
+                id="get_weather.current",
+                description="Bypass LLM for current local weather ('what's the weather', 'is it raining')",
+                example="what's the weather",
+                regex=r"^\s*(?:what(?:'?s|\s+is)?\s+the\s+(?:weather|forecast|temperature|temp)(?:\s+(?:today|like|outside))?|weather(?:\s+today)?|is\s+it\s+rain(?:ing)?(?:\s+today)?|is\s+it\s+(?:hot|cold|sunny|cloudy|snowing)(?:\s+outside)?)\s*[?.!]*$",
+                handler="_fp_weather_current",
+            ),
+            FastPathPattern(
+                id="get_weather.tomorrow",
+                description="Bypass LLM for tomorrow's local weather",
+                example="what's the weather tomorrow",
+                regex=r"^\s*(?:what(?:'?s|\s+is)?\s+the\s+)?(?:weather|forecast|temperature|temp)\s+tomorrow\s*[?.!]*$",
+                handler="_fp_weather_tomorrow",
+            ),
+        ]
+
+    def _fp_weather_in_location(self, match, voice_command: str) -> PreRouteResult | None:
+        location = match.group("location").strip()
+        if not location:
+            return None
+        return PreRouteResult(arguments={
+            "city": location,
+            "resolved_datetimes": [get_example_date_with_offset(0)],
+        })
+
+    def _fp_weather_current(self, match, voice_command: str) -> PreRouteResult | None:
+        return PreRouteResult(arguments={
+            "resolved_datetimes": [get_example_date_with_offset(0)],
+        })
+
+    def _fp_weather_tomorrow(self, match, voice_command: str) -> PreRouteResult | None:
+        return PreRouteResult(arguments={
+            "resolved_datetimes": [get_example_date_with_offset(1)],
+        })
+
     def run(self, request_info: RequestInformation, *, secrets: dict, **kwargs) -> CommandResponse:
         api_key = secrets.get("OPENWEATHER_API_KEY")
         if not api_key:
@@ -352,20 +418,28 @@ class OpenWeatherCommand(IJarvisCommand):
                             hours=12,
                         )
 
-                        return CommandResponse.success_response(
-                            context_data={
-                                "city": city,
-                                "temperature": temp,
-                                "description": description,
-                                "humidity": humidity,
-                                "wind_speed": wind_speed,
-                                "unit_symbol": unit_symbol,
-                                "unit_system": unit_system,
-                                "weather_type": "current",
-                                "next_hour_precip": next_hour_precip,
-                                "next_12_hours": next_hours,
-                            }
-                        )
+                        ctx = {
+                            "city": city,
+                            "temperature": temp,
+                            "description": description,
+                            "humidity": humidity,
+                            "wind_speed": wind_speed,
+                            "unit_symbol": unit_symbol,
+                            "unit_system": unit_system,
+                            "weather_type": "current",
+                            "next_hour_precip": next_hour_precip,
+                            "next_12_hours": next_hours,
+                        }
+                        # Fast-path callers have no LLM downstream — pre-compose
+                        # the spoken sentence. The LLM path keeps its structured
+                        # response so it can answer sub-day questions like
+                        # "is it going to rain in the next hour?".
+                        if request_info.is_pre_routed:
+                            ctx["message"] = (
+                                f"It's {round(temp)}{unit_symbol} and "
+                                f"{description} in {city}."
+                            )
+                        return CommandResponse.success_response(context_data=ctx)
             except Exception:
                 pass
 
@@ -429,16 +503,17 @@ class OpenWeatherCommand(IJarvisCommand):
 
                 full_forecast_summary = '; '.join(forecast_summaries)
 
-                return CommandResponse.success_response(
-                    context_data={
-                        "city": city,
-                        "dates": [data["date"] for data in all_forecast_data],
-                        "forecast_summary": full_forecast_summary,
-                        "forecast_details": all_forecast_data,
-                        "unit_system": unit_system,
-                        "weather_type": "forecast"
-                    }
-                )
+                ctx = {
+                    "city": city,
+                    "dates": [data["date"] for data in all_forecast_data],
+                    "forecast_summary": full_forecast_summary,
+                    "forecast_details": all_forecast_data,
+                    "unit_system": unit_system,
+                    "weather_type": "forecast"
+                }
+                if request_info.is_pre_routed:
+                    ctx["message"] = f"Forecast for {city}: {full_forecast_summary}"
+                return CommandResponse.success_response(context_data=ctx)
 
             if len(target_dates) == 1:
                 message = f"I couldn't find weather data for {target_dates[0].strftime('%B %d, %Y')}. The forecast only covers the next 8 days."
