@@ -108,15 +108,29 @@ class WeatherContextAgent(IJarvisAgent):
 
             cmd = OpenWeatherCommand()
 
+            # OpenWeatherCommand.run() requires secrets as a keyword-only arg
+            # (commit 919cf36: refactor to SDK secrets kwarg). The voice path
+            # gets this from the runtime; agents call .run() directly so we
+            # have to assemble the dict ourselves.
+            secrets: dict[str, str] = {"OPENWEATHER_API_KEY": api_key}
+            for optional_key in ("OPENWEATHER_LOCATION", "OPENWEATHER_UNITS"):
+                val = _storage.get_secret(optional_key)
+                if val:
+                    secrets[optional_key] = val
+
             # Fetch current weather
             request_info = RequestInformation(
                 voice_command="weather check",
                 conversation_id="weather-context-agent",
             )
-            current_response = cmd.run(request_info, resolved_datetimes=["today"])
+            current_response = cmd.run(
+                request_info, secrets=secrets, resolved_datetimes=["today"],
+            )
 
             # Fetch tomorrow's forecast
-            tomorrow_response = cmd.run(request_info, resolved_datetimes=["tomorrow"])
+            tomorrow_response = cmd.run(
+                request_info, secrets=secrets, resolved_datetimes=["tomorrow"],
+            )
 
             memories = []
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")

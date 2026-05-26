@@ -1,7 +1,7 @@
 name: "get_weather_openweather"
 display_name: "OpenWeather"
 description: "Current weather conditions and forecasts up to 8 days via OpenWeather API. Requires free API key. Supports city lookup, IP-based location fallback, and configurable units."
-version: "1.1.1"
+version: "1.1.2"
 min_jarvis_version: "0.1.4"
 license: "MIT"
 author:
