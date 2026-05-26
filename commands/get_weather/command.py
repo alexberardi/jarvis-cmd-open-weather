@@ -69,6 +69,59 @@ except ImportError:
 logger = JarvisLogger(service="jarvis-node")
 
 
+_UNIT_SYMBOLS: dict[str, str] = {
+    "imperial": "°F",
+    "metric": "°C",
+    "kelvin": "K",
+}
+
+
+def _summarize_minutely(minutely: list[dict]) -> str:
+    """Compact natural-language summary of the next ~hour of precipitation.
+
+    OpenWeather One Call 3.0 returns 60 entries at 1-minute resolution.
+    Returns "" if the block is missing.
+    """
+    if not minutely:
+        return ""
+    window = minutely[:60]
+    start_idx: int | None = None
+    for i, entry in enumerate(window):
+        if (entry.get("precipitation") or 0) > 0:
+            start_idx = i
+            break
+    if start_idx is None:
+        return "No precipitation expected in the next hour."
+    intensity = window[start_idx].get("precipitation", 0) or 0
+    if start_idx == 0:
+        return f"Precipitation now (~{intensity:.2f} mm/h)."
+    return f"Precipitation expected in ~{start_idx} min (~{intensity:.2f} mm/h)."
+
+
+def _summarize_hourly(
+    hourly: list[dict], unit_symbol: str, hours: int = 12
+) -> list[dict]:
+    """Compact next-N-hours snapshots from OpenWeather hourly block."""
+    if not hourly:
+        return []
+    out: list[dict] = []
+    for entry in hourly[:hours]:
+        try:
+            dt = datetime.datetime.fromtimestamp(entry["dt"])
+            label = dt.strftime("%-I%p").lower()
+        except (KeyError, ValueError, TypeError, OSError):
+            label = "?"
+        weather = entry.get("weather") or [{}]
+        out.append({
+            "time": label,
+            "temp": round(entry.get("temp", 0)),
+            "unit": unit_symbol,
+            "precip_chance": int((entry.get("pop") or 0) * 100),
+            "description": weather[0].get("description", "unknown"),
+        })
+    return out
+
+
 class OpenWeatherCommand(IJarvisCommand):
 
     @property
@@ -81,7 +134,14 @@ class OpenWeatherCommand(IJarvisCommand):
 
     @property
     def description(self) -> str:
-        return "Weather conditions or forecast (up to 5 days). Use for ALL weather queries including unit preferences. For time queries use get_current_time."
+        return (
+            "Weather: current conditions, hourly forecast (next 12 hours), "
+            "minutely precipitation (next hour), and daily forecast (up to 8 days). "
+            "For sub-day questions ('rain in the next hour', 'this afternoon', "
+            "'tonight', 'soon'), pass resolved_datetimes=['today'] — the response "
+            "already contains next_hour_precip and next_12_hours fields. "
+            "For time queries use get_current_time."
+        )
 
     def generate_prompt_examples(self) -> List[CommandExample]:
         """Generate concise example utterances with expected parameters using date keys.
@@ -157,7 +217,15 @@ class OpenWeatherCommand(IJarvisCommand):
     def parameters(self) -> List[IJarvisParameter]:
         return [
             JarvisParameter("city", "string", required=False, default=None, description="City name. Omit for default location."),
-            JarvisParameter("resolved_datetimes", "array<datetime>", required=True, description="Date keys: 'today','tomorrow','this_weekend', etc. (max 5 days). Default 'today'."),
+            JarvisParameter(
+                "resolved_datetimes", "array<datetime>", required=True,
+                description=(
+                    "Day-level date keys ONLY: 'today','tomorrow','this_weekend', etc. "
+                    "(max 8 days). For sub-day questions ('next hour', 'this afternoon', "
+                    "'tonight', 'soon'), pass ['today'] — the response carries hourly + "
+                    "minutely data. Default 'today'."
+                ),
+            ),
         ]
 
     @property
@@ -184,13 +252,15 @@ class OpenWeatherCommand(IJarvisCommand):
         return [
             JarvisSecret("OPENWEATHER_API_KEY", "Open Weather API Key", "integration", "string", friendly_name="API Key"),
             JarvisSecret("OPENWEATHER_UNITS", "Imperial, Metric, or Kelvin", "integration", "string", is_sensitive=False, friendly_name="Units"),
-            JarvisSecret("OPENWEATHER_LOCATION", "city,state_code,country_code, ie Miami,FL,US. If omitted and no location is found in the command, location will be retrieved from ip-api.com", "node", "string", is_sensitive=False, friendly_name="Default Location")
+            JarvisSecret("OPENWEATHER_LOCATION", "city,state_code,country_code, ie Miami,FL,US. If omitted and no location is found in the command, location will be retrieved from ip-api.com", "integration", "string", is_sensitive=False, friendly_name="Default Location")
         ]
 
     @property
     def critical_rules(self) -> List[str]:
         return [
             "city param for location (NOT 'query'). This tool has NO 'query' parameter.",
+            "For sub-day questions (next hour, this afternoon, tonight, soon, in a bit), pass resolved_datetimes=['today']. The response includes next_hour_precip and next_12_hours — read those fields instead of inventing date keys.",
+            "NEVER invent date keys like 'next_hour', 'next_15_minutes', 'in_3_hours'. Use canonical keys only: today, tomorrow, this_weekend, etc.",
             "Not for time queries—use get_current_time.",
         ]
 
@@ -267,6 +337,20 @@ class OpenWeatherCommand(IJarvisCommand):
                         description = current["weather"][0]["description"]
                         humidity = current.get("humidity", "N/A")
                         wind_speed = current.get("wind_speed", "N/A")
+                        unit_symbol = _UNIT_SYMBOLS.get(unit_system, "°F")
+
+                        # One Call 3.0 already returns minutely (60min) and
+                        # hourly (48h) — surface them so the LLM can answer
+                        # short-term questions ("rain in next hour?", "weather
+                        # at 5pm?") instead of just narrating current temp.
+                        next_hour_precip = _summarize_minutely(
+                            onecall_data.get("minutely") or []
+                        )
+                        next_hours = _summarize_hourly(
+                            onecall_data.get("hourly") or [],
+                            unit_symbol,
+                            hours=12,
+                        )
 
                         return CommandResponse.success_response(
                             context_data={
@@ -275,8 +359,11 @@ class OpenWeatherCommand(IJarvisCommand):
                                 "description": description,
                                 "humidity": humidity,
                                 "wind_speed": wind_speed,
+                                "unit_symbol": unit_symbol,
                                 "unit_system": unit_system,
-                                "weather_type": "current"
+                                "weather_type": "current",
+                                "next_hour_precip": next_hour_precip,
+                                "next_12_hours": next_hours,
                             }
                         )
             except Exception:

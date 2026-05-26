@@ -33,7 +33,7 @@ secrets:
     description: "Unit system: imperial (°F), metric (°C), or kelvin"
     is_sensitive: false
   - key: OPENWEATHER_LOCATION
-    scope: node
+    scope: integration
     value_type: string
     description: "Default location as city,state_code,country_code (e.g., Miami,FL,US). Falls back to IP geolocation if omitted."
     is_sensitive: false
