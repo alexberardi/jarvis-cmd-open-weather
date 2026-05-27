@@ -75,7 +75,7 @@ class WeatherContextAgent(IJarvisAgent):
             JarvisSecret(
                 "OPENWEATHER_LOCATION",
                 "Default location as city,state_code,country_code (e.g., Miami,FL,US)",
-                "node",
+                "integration",
                 "string",
                 required=False,
             ),
