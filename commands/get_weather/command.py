@@ -435,10 +435,19 @@ class OpenWeatherCommand(IJarvisCommand):
                         # response so it can answer sub-day questions like
                         # "is it going to rain in the next hour?".
                         if request_info.is_pre_routed:
-                            ctx["message"] = (
-                                f"It's {round(temp)}{unit_symbol} and "
-                                f"{description} in {city}."
-                            )
+                            # Keep it terse — drop the city when the request
+                            # didn't name one (the user already knows their
+                            # default location). Cuts ~1-2s of TTS playback.
+                            user_specified_city = bool(kwargs.get("city"))
+                            if user_specified_city:
+                                ctx["message"] = (
+                                    f"It's {round(temp)} and "
+                                    f"{description} in {city}."
+                                )
+                            else:
+                                ctx["message"] = (
+                                    f"It's {round(temp)} and {description}."
+                                )
                         return CommandResponse.success_response(context_data=ctx)
             except Exception:
                 pass
