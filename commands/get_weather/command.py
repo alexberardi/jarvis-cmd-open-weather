@@ -520,8 +520,13 @@ class OpenWeatherCommand(IJarvisCommand):
                     "unit_system": unit_system,
                     "weather_type": "forecast"
                 }
-                if request_info.is_pre_routed:
-                    ctx["message"] = f"Forecast for {city}: {full_forecast_summary}"
+                # Always attach the spoken summary so the command-center voice
+                # fast-path speaks it directly (skipping the formatting LLM,
+                # which otherwise risks generic filler like "Task completed.").
+                # The forecast summary is a complete spoken answer — unlike the
+                # current-weather branch above, there are no sub-day follow-ups
+                # ("rain in the next hour?") that need the structured data.
+                ctx["message"] = f"Forecast for {city}: {full_forecast_summary}"
                 return CommandResponse.success_response(context_data=ctx)
 
             if len(target_dates) == 1:
