@@ -11,13 +11,13 @@ Current weather conditions and forecasts up to 8 days via the OpenWeather API.
 ## Install
 
 ```bash
-jarvis pantry install --url https://github.com/alexberardi/jarvis-cmd-weather
+jarvis pantry install --url https://github.com/alexberardi/jarvis-cmd-open-weather
 ```
 
 Or from a local checkout:
 
 ```bash
-jarvis pantry install --local /path/to/jarvis-cmd-weather
+jarvis pantry install --local /path/to/jarvis-cmd-open-weather
 ```
 
 ## Setup
